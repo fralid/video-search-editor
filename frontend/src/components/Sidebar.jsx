@@ -1,8 +1,7 @@
 import React from 'react';
 import { IconLibrary, IconAdd, IconMenu } from './Icons';
-import PopularWords from './PopularWords';
 
-export default function Sidebar({ isOpen, setIsOpen, onOpenLibrary, onOpenAdd, onWordSearch }) {
+export default function Sidebar({ isOpen, setIsOpen, onOpenLibrary, onOpenAdd }) {
     return (
         <div className={`fixed inset-y-0 left-0 z-50 bg-panel border-r border-border transition-all duration-300 flex flex-col ${isOpen ? 'w-64' : 'w-16'}`}>
             {/* Header / Toggle */}
@@ -34,13 +33,6 @@ export default function Sidebar({ isOpen, setIsOpen, onOpenLibrary, onOpenAdd, o
                     {isOpen && <span className="font-medium text-sm">Добавить видео</span>}
                 </button>
             </div>
-
-            {/* Popular Words — only when sidebar is open */}
-            {isOpen && (
-                <div className="flex-1 overflow-hidden border-t border-border/50 mt-2">
-                    <PopularWords onSearch={onWordSearch} isOpen={isOpen} />
-                </div>
-            )}
 
             {/* Footer */}
             <div className="p-4 mt-auto border-t border-border/50">

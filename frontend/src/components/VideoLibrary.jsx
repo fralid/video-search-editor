@@ -1,8 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import ClipEditor from './ClipEditor';
 import { IconLogs, IconClose } from './Icons';
+import { useToast, useConfirm } from '../contexts/UIContext';
 
 export default function VideoLibrary({ refreshTrigger }) {
+    const { addToast } = useToast();
+    const { confirm } = useConfirm();
     const [videos, setVideos] = useState([]);
     const [channels, setChannels] = useState([]);
     const [selectedChannel, setSelectedChannel] = useState('');
@@ -10,6 +13,18 @@ export default function VideoLibrary({ refreshTrigger }) {
     const [clipEditorVideoId, setClipEditorVideoId] = useState(null);
     const [logsData, setLogsData] = useState({ videoId: null, logs: [] });
     const [orphanedEmbeddings, setOrphanedEmbeddings] = useState(null);
+    const [tabVisible, setTabVisible] = useState(() => typeof document !== 'undefined' ? !document.hidden : true);
+    const [expandedIds, setExpandedIds] = useState(() => new Set());
+    const [channelEdit, setChannelEdit] = useState({ videoId: null, channel_name: '', source_url: '' });
+
+    const toggleExpanded = (videoId) => {
+        setExpandedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(videoId)) next.delete(videoId);
+            else next.add(videoId);
+            return next;
+        });
+    };
 
     const fetchChannels = async () => {
         try {
@@ -43,11 +58,17 @@ export default function VideoLibrary({ refreshTrigger }) {
     }, []);
 
     useEffect(() => {
+        const onVisibility = () => setTabVisible(!document.hidden);
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => document.removeEventListener('visibilitychange', onVisibility);
+    }, []);
+
+    useEffect(() => {
         fetchVideos();
-        // Poll every 15 seconds to update statuses
-        const interval = setInterval(fetchVideos, 15000);
+        const ms = tabVisible ? 15000 : 30000; // 15s в фокусе, 30s в фоне
+        const interval = setInterval(fetchVideos, ms);
         return () => clearInterval(interval);
-    }, [refreshTrigger, selectedChannel]);
+    }, [refreshTrigger, selectedChannel, tabVisible]);
 
     const handleTranscribe = async (videoId) => {
         if (processing[videoId]) return;
@@ -74,29 +95,41 @@ export default function VideoLibrary({ refreshTrigger }) {
     };
 
     const handleDelete = async (videoId) => {
-        if (!window.confirm("Удалить это видео и все связанные данные?")) return;
+        const ok = await confirm({ title: 'Удалить видео', message: 'Удалить это видео и все связанные данные?', danger: true, confirmLabel: 'Удалить' });
+        if (!ok) return;
         try {
             const res = await fetch(`/api/videos/${videoId}`, { method: 'DELETE' });
             if (res.ok) {
+                addToast('Видео удалено', 'success');
                 fetchVideos();
                 fetchChannels();
+            } else {
+                const data = await res.json().catch(() => ({}));
+                addToast(data.error || 'Ошибка удаления', 'error');
             }
         } catch (err) {
             console.error("Delete failed", err);
+            addToast('Ошибка сети', 'error');
         }
     };
 
     const handleReprocess = async (videoId) => {
-        if (!window.confirm("Запустить обработку видео заново? Это удалит старую транскрипцию и индекс.")) return;
+        const ok = await confirm({ title: 'Перезапустить обработку', message: 'Запустить обработку видео заново? Это удалит старую транскрипцию и индекс.', danger: true, confirmLabel: 'Запустить' });
+        if (!ok) return;
         setProcessing(p => ({ ...p, [videoId]: 'reprocess' }));
         try {
             const res = await fetch(`/api/videos/${videoId}/reprocess`, { method: 'POST' });
             if (res.ok) {
+                addToast('Видео поставлено в очередь', 'success');
                 setTimeout(fetchVideos, 2000);
+            } else {
+                setProcessing(p => ({ ...p, [videoId]: null }));
+                addToast('Ошибка запроса', 'error');
             }
         } catch (err) {
             console.error("Reprocess failed", err);
             setProcessing(p => ({ ...p, [videoId]: null }));
+            addToast('Ошибка сети', 'error');
         }
     };
 
@@ -121,25 +154,26 @@ export default function VideoLibrary({ refreshTrigger }) {
             }
         } catch (err) {
             console.error("Failed to fetch orphaned embeddings", err);
-            alert("Ошибка загрузки списка осиротевших эмбеддингов");
+            addToast("Ошибка загрузки списка осиротевших эмбеддингов", 'error');
         }
     };
 
     const deleteEmbeddings = async (videoId) => {
-        if (!window.confirm(`Удалить эмбеддинги для видео "${videoId}"?`)) return;
+        const ok = await confirm({ title: 'Удалить эмбеддинги', message: `Удалить эмбеддинги для видео "${videoId}"?`, danger: true, confirmLabel: 'Удалить' });
+        if (!ok) return;
         try {
             const res = await fetch(`/api/embeddings/${encodeURIComponent(videoId)}`, { method: 'DELETE' });
             if (res.ok) {
                 const data = await res.json();
-                alert(`Удалено ${data.deleted_count} эмбеддингов для видео "${videoId}"`);
-                fetchOrphanedEmbeddings(); // Обновляем список
+                addToast(`Удалено ${data.deleted_count} эмбеддингов для видео "${videoId}"`, 'success');
+                fetchOrphanedEmbeddings();
             } else {
-                const error = await res.json();
-                alert(`Ошибка: ${error.message || 'Не удалось удалить эмбеддинги'}`);
+                const error = await res.json().catch(() => ({}));
+                addToast(error.message || 'Не удалось удалить эмбеддинги', 'error');
             }
         } catch (err) {
             console.error("Failed to delete embeddings", err);
-            alert("Ошибка удаления эмбеддингов");
+            addToast("Ошибка удаления эмбеддингов", 'error');
         }
     };
 
@@ -163,6 +197,45 @@ export default function VideoLibrary({ refreshTrigger }) {
         const s = seconds % 60;
         if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         return `${m}:${s.toString().padStart(2, '0')}`;
+    };
+
+    const saveVideoChannel = async (videoId, channel_name, source_url) => {
+        try {
+            const body = {};
+            if (channel_name !== undefined && channel_name !== '') body.channel_name = channel_name;
+            if (source_url !== undefined && source_url !== '') body.source_url = source_url;
+            if (Object.keys(body).length === 0) return;
+            const res = await fetch(`/api/videos/${videoId}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (res.ok) {
+                addToast('Канал сохранён', 'success');
+                setChannelEdit({ videoId: null, channel_name: '', source_url: '' });
+                fetchVideos();
+            } else {
+                const data = await res.json().catch(() => ({}));
+                addToast(data.error || 'Ошибка сохранения', 'error');
+            }
+        } catch (err) {
+            addToast('Ошибка сети', 'error');
+        }
+    };
+
+    /** Из строки (URL или название) получаем подпись для показа: только @handle или как есть. */
+    const channelNameToDisplay = (name) => {
+        if (!name || typeof name !== 'string') return '—';
+        const atMatch = name.match(/youtube\.com\/@([^/?]+)/i) || name.match(/youtu\.be\/@([^/?]+)/i) || name.match(/@([^/?\s]+)/);
+        if (atMatch) return atMatch[1].startsWith('@') ? atMatch[1] : `@${atMatch[1]}`;
+        return name;
+    };
+    /** Для карточки: приоритет source_url, иначе channel_name; всегда показываем только @handle или название. */
+    const channelDisplayLabel = (vid) => {
+        const fromUrl = vid.source_url || '';
+        const atMatch = fromUrl.match(/youtube\.com\/@([^/?]+)/i) || fromUrl.match(/youtu\.be\/@([^/?]+)/i);
+        if (atMatch) return `@${atMatch[1]}`;
+        return channelNameToDisplay(vid.channel_name);
     };
 
     const getStatusBadge = (status) => {
@@ -198,7 +271,7 @@ export default function VideoLibrary({ refreshTrigger }) {
                             <option value="">All channels ({videos.length})</option>
                             {channels.map(ch => (
                                 <option key={ch.name} value={ch.name}>
-                                    {ch.name} ({ch.count})
+                                    {channelNameToDisplay(ch.name)} ({ch.count})
                                 </option>
                             ))}
                         </select>
@@ -217,10 +290,10 @@ export default function VideoLibrary({ refreshTrigger }) {
                             const res = await fetch('/api/videos/scan', { method: 'POST' });
                             const data = await res.json();
                             if (data.added > 0) {
-                                alert(`✅ Найдено ${data.added} новых видео из ${data.total_files} файлов`);
+                                addToast(`Найдено ${data.added} новых видео из ${data.total_files} файлов`, 'success');
                                 fetchVideos();
                             } else {
-                                alert(`Все ${data.total_files} файлов уже в базе`);
+                                addToast(`Все ${data.total_files} файлов уже в базе`, 'info');
                             }
                         }}
                         className="text-muted hover:text-emerald-400 text-xs transition-colors font-medium"
@@ -230,14 +303,15 @@ export default function VideoLibrary({ refreshTrigger }) {
                     </button>
                     <button
                         onClick={async () => {
-                            if (!window.confirm('Сканировать папку и поставить ВСЕ новые видео в очередь транскрипции?')) return;
+                            const ok = await confirm({ title: 'Сканировать и обработать', message: 'Сканировать папку и поставить ВСЕ новые видео в очередь транскрипции?', danger: false, confirmLabel: 'Да' });
+                            if (!ok) return;
                             const res = await fetch('/api/videos/scan?process=true', { method: 'POST' });
                             const data = await res.json();
                             if (data.added > 0) {
-                                alert(`✅ Добавлено ${data.added} видео в очередь обработки`);
+                                addToast(`Добавлено ${data.added} видео в очередь обработки`, 'success');
                                 fetchVideos();
                             } else {
-                                alert(`Новых видео не найдено (${data.total_files} уже в базе)`);
+                                addToast(`Новых видео не найдено (${data.total_files} уже в базе)`, 'info');
                             }
                         }}
                         className="text-muted hover:text-emerald-400 text-xs transition-colors font-medium"
@@ -250,9 +324,9 @@ export default function VideoLibrary({ refreshTrigger }) {
                             const res = await fetch('/api/videos/process-pending', { method: 'POST' });
                             const data = await res.json();
                             if (data.enqueued > 0) {
-                                alert(`⚡ ${data.enqueued} видео поставлено в очередь (${data.skipped} пропущено — уже обработаны или в очереди)`);
+                                addToast(`${data.enqueued} видео поставлено в очередь (${data.skipped} пропущено)`, 'success');
                             } else {
-                                alert(`Все ${data.total} видео уже обработаны ✅`);
+                                addToast(`Все ${data.total} видео уже обработаны`, 'success');
                             }
                         }}
                         className="text-muted hover:text-amber-400 text-xs transition-colors font-medium"
@@ -264,7 +338,7 @@ export default function VideoLibrary({ refreshTrigger }) {
                         onClick={async () => {
                             const res = await fetch('/api/videos/refresh-all-metadata', { method: 'POST' });
                             const data = await res.json();
-                            alert(`Updating metadata for ${data.videos_to_update} videos...`);
+                            addToast(`Обновление метаданных: ${data.videos_to_update} видео`, 'info');
                             setTimeout(() => { fetchVideos(); fetchChannels(); }, 5000);
                         }}
                         className="text-muted hover:text-main text-xs transition-colors"
@@ -278,90 +352,148 @@ export default function VideoLibrary({ refreshTrigger }) {
                 </div>
             </div>
 
-            <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar flex-1 pb-6">
-                {videos.map((vid) => (
-                    <div key={vid.video_id} className="bg-element p-5 rounded-2xl border border-border/50 hover:bg-white/5 transition-all group">
-                        <div className="flex items-start gap-6">
-                            {/* Thumbnail */}
-                            <div className="w-56 h-32 bg-black rounded-xl overflow-hidden relative border border-white/5 flex-shrink-0 shadow-lg">
-                                {vid.thumbnail_url ? (
-                                    <img src={vid.thumbnail_url} alt="" className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
-                                ) : (
-                                    <div className="w-full h-full flex items-center justify-center text-4xl opacity-30">📺</div>
-                                )}
-                                {vid.duration && (
-                                    <span className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-0.5 rounded font-mono font-bold">
-                                        {formatDuration(vid.duration)}
-                                    </span>
-                                )}
-                            </div>
-
-                            <div className="flex-1 min-w-0 py-1">
-                                <div className="font-bold text-main text-xl line-clamp-2 mb-2 group-hover:text-electric transition-colors" title={vid.title}>
+            <div className="space-y-1 overflow-y-auto pr-2 custom-scrollbar flex-1 pb-6">
+                {videos.map((vid) => {
+                    const isExpanded = expandedIds.has(vid.video_id);
+                    return (
+                        <div key={vid.video_id} className="bg-element rounded-xl border border-border/50 hover:bg-white/5 transition-all group overflow-hidden">
+                            {/* Полоска: название + стрелка */}
+                            <button
+                                type="button"
+                                onClick={() => toggleExpanded(vid.video_id)}
+                                className="w-full flex items-center gap-3 px-4 py-3 text-left"
+                            >
+                                <span
+                                    className={`flex-shrink-0 w-6 h-6 flex items-center justify-center rounded transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                                    aria-hidden
+                                >
+                                    <svg className="w-4 h-4 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <path d="M9 18l6-6-6-6" />
+                                    </svg>
+                                </span>
+                                <span className="flex-1 min-w-0 font-medium text-main truncate" title={vid.title || vid.video_id}>
                                     {vid.title || vid.video_id}
-                                </div>
-                                <div className="flex gap-3 items-center text-sm text-muted">
-                                    <span className="truncate max-w-[200px] bg-white/5 px-2 py-1 rounded-md border border-white/5">{vid.channel_name}</span>
-                                </div>
+                                </span>
+                            </button>
 
-                                {/* Statuses */}
-                                <div className="flex gap-4 mt-4 pt-3">
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Загрузка</span>
-                                        {getStatusBadge(vid.status_download)}
+                            {/* Развёрнутый блок */}
+                            {isExpanded && (
+                                <div className="px-4 pb-4 pt-0 border-t border-border/50">
+                                    <div className="flex items-start gap-6 pt-4">
+                                        <div className="w-56 h-32 bg-black rounded-xl overflow-hidden relative border border-white/5 flex-shrink-0 shadow-lg">
+                                            {vid.thumbnail_url ? (
+                                                <img src={vid.thumbnail_url} alt="" className="w-full h-full object-cover opacity-90 group-hover:opacity-100 transition-opacity" />
+                                            ) : (
+                                                <div className="w-full h-full flex items-center justify-center text-4xl opacity-30">📺</div>
+                                            )}
+                                            {vid.duration && (
+                                                <span className="absolute bottom-2 right-2 bg-black/80 text-white text-xs px-2 py-0.5 rounded font-mono font-bold">
+                                                    {formatDuration(vid.duration)}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <div className="flex-1 min-w-0 py-1">
+                                            <div className="flex gap-3 items-center text-sm text-muted flex-wrap">
+                                                <span className="truncate max-w-[200px] bg-white/5 px-2 py-1 rounded-md border border-white/5">{channelDisplayLabel(vid)}</span>
+                                                {vid.source_url && (
+                                                    <a
+                                                        href={vid.source_url}
+                                                        target="_blank"
+                                                        rel="noopener noreferrer"
+                                                        className="text-electric hover:underline truncate max-w-[320px]"
+                                                        title={vid.source_url}
+                                                        onClick={(e) => e.stopPropagation()}
+                                                    >
+                                                        {channelDisplayLabel(vid)}
+                                                    </a>
+                                                )}
+                                            </div>
+                                            <div className="mt-3 pt-3 border-t border-white/5">
+                                                <div className="text-[10px] font-bold uppercase tracking-wider text-muted mb-2">Канал (откуда скачан)</div>
+                                                {channelEdit.videoId === vid.video_id ? (
+                                                    <div className="flex flex-wrap items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                                        <input
+                                                            type="text"
+                                                            placeholder="Название или @ник (напр. Юлия Латынина или @yulialatynina71)"
+                                                            value={channelEdit.channel_name}
+                                                            onChange={(e) => setChannelEdit(prev => ({ ...prev, channel_name: e.target.value }))}
+                                                            className="bg-element border border-border rounded px-2 py-1 text-xs w-56"
+                                                        />
+                                                        <input
+                                                            type="text"
+                                                            placeholder="youtube.com/... (опционально)"
+                                                            value={channelEdit.source_url}
+                                                            onChange={(e) => setChannelEdit(prev => ({ ...prev, source_url: e.target.value }))}
+                                                            className="bg-element border border-border rounded px-2 py-1 text-xs flex-1 min-w-[180px]"
+                                                        />
+                                                        <button type="button" onClick={() => saveVideoChannel(vid.video_id, channelEdit.channel_name, channelEdit.source_url)} className="text-[10px] px-2 py-1 rounded bg-electric/20 text-electric font-medium">Сохранить</button>
+                                                        <button type="button" onClick={() => setChannelEdit({ videoId: null, channel_name: '', source_url: '' })} className="text-[10px] px-2 py-1 rounded bg-white/5 text-muted">Отмена</button>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => { e.stopPropagation(); setChannelEdit({ videoId: vid.video_id, channel_name: vid.channel_name || '', source_url: vid.source_url || '' }); }}
+                                                        className="text-[10px] px-2 py-1 rounded bg-white/5 text-muted hover:text-main border border-border/50"
+                                                    >
+                                                        {vid.channel_name ? 'Изменить канал' : 'Указать канал'}
+                                                    </button>
+                                                )}
+                                            </div>
+                                            <div className="flex gap-4 mt-4 pt-3">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Загрузка</span>
+                                                    {getStatusBadge(vid.status_download)}
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Транскрипция</span>
+                                                    {getStatusBadge(vid.status_transcribe)}
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Индекс</span>
+                                                    {getStatusBadge(vid.status_index)}
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Транскрипция</span>
-                                        {getStatusBadge(vid.status_transcribe)}
-                                    </div>
-                                    <div className="flex items-center gap-2">
-                                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted">Индекс</span>
-                                        {getStatusBadge(vid.status_index)}
+                                    <div className="flex gap-3 mt-4 justify-end border-t border-white/5 pt-4 flex-wrap">
+                                        {vid.status_transcribe !== 'done' && (
+                                            <button onClick={() => handleTranscribe(vid.video_id)} disabled={!!processing[vid.video_id]} className="text-sm bg-electric/10 text-electric px-4 py-2 rounded-lg hover:bg-electric/20 transition-colors font-medium">
+                                                Транскрибировать
+                                            </button>
+                                        )}
+                                        {vid.status_transcribe === 'done' && vid.status_index !== 'done' && (
+                                            <button onClick={() => handleIndex(vid.video_id)} disabled={!!processing[vid.video_id]} className="text-sm bg-electric/10 text-electric px-4 py-2 rounded-lg hover:bg-electric/20 transition-colors font-medium">
+                                                Индексировать
+                                            </button>
+                                        )}
+                                        <button
+                                            onClick={() => handleReprocess(vid.video_id)}
+                                            disabled={!!processing[vid.video_id]}
+                                            className="text-sm bg-plasma/10 text-plasma px-3 py-2 rounded-lg hover:bg-plasma/20 transition-colors font-medium border border-plasma/20"
+                                            title="Перезапустить обработку (ASR + Index)"
+                                        >
+                                            🔄 Заново
+                                        </button>
+                                        <button
+                                            onClick={() => fetchLogs(vid.video_id)}
+                                            className="text-sm bg-white/5 text-muted px-3 py-2 rounded-lg hover:text-main transition-colors border border-border/50 flex items-center gap-1"
+                                            title="Посмотреть логи обработки"
+                                        >
+                                            <IconLogs className="w-4 h-4" /> Логи
+                                        </button>
+                                        <button
+                                            onClick={() => handleDelete(vid.video_id)}
+                                            className="text-sm bg-red-500/10 text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/20 transition-colors font-medium border border-red-500/20"
+                                            title="Удалить из базы"
+                                        >
+                                            🗑️
+                                        </button>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-
-                        {/* Actions */}
-                        <div className="flex gap-3 mt-4 justify-end border-t border-white/5 pt-4 opacity-80 group-hover:opacity-100 transition-opacity">
-                            {vid.status_transcribe !== 'done' && (
-                                <button onClick={() => handleTranscribe(vid.video_id)} disabled={!!processing[vid.video_id]} className="text-sm bg-electric/10 text-electric px-4 py-2 rounded-lg hover:bg-electric/20 transition-colors font-medium">
-                                    Транскрибировать
-                                </button>
                             )}
-                            {vid.status_transcribe === 'done' && vid.status_index !== 'done' && (
-                                <button onClick={() => handleIndex(vid.video_id)} disabled={!!processing[vid.video_id]} className="text-sm bg-electric/10 text-electric px-4 py-2 rounded-lg hover:bg-electric/20 transition-colors font-medium">
-                                    Индексировать
-                                </button>
-                            )}
-
-                            <button
-                                onClick={() => handleReprocess(vid.video_id)}
-                                disabled={!!processing[vid.video_id]}
-                                className="text-sm bg-plasma/10 text-plasma px-3 py-2 rounded-lg hover:bg-plasma/20 transition-colors font-medium border border-plasma/20"
-                                title="Перезапустить обработку (ASR + Index)"
-                            >
-                                🔄 Заново
-                            </button>
-
-                            <button
-                                onClick={() => fetchLogs(vid.video_id)}
-                                className="text-sm bg-white/5 text-muted px-3 py-2 rounded-lg hover:text-main transition-colors border border-border/50 flex items-center gap-1"
-                                title="Посмотреть логи обработки"
-                            >
-                                <IconLogs className="w-4 h-4" /> Логи
-                            </button>
-
-                            <button
-                                onClick={() => handleDelete(vid.video_id)}
-                                className="text-sm bg-red-500/10 text-red-400 px-3 py-2 rounded-lg hover:bg-red-500/20 transition-colors font-medium border border-red-500/20"
-                                title="Удалить из базы"
-                            >
-                                🗑️
-                            </button>
                         </div>
-                    </div>
-                ))}
+                    );
+                })}
                 {videos.length === 0 && (
                     <div className="text-center py-20 text-muted font-mono text-sm">
                         Index Empty. Init sequence required.
@@ -424,7 +556,13 @@ export default function VideoLibrary({ refreshTrigger }) {
                                         <div className="mt-4 pt-4 border-t border-border">
                                             <button
                                                 onClick={async () => {
-                                                    if (!window.confirm(`Удалить ВСЕ ${orphanedEmbeddings.orphaned_count} осиротевших эмбеддингов?`)) return;
+                                                    const ok = await confirm({
+                                                        title: 'Удалить все осиротевшие эмбеддинги',
+                                                        message: `Удалить ВСЕ ${orphanedEmbeddings.orphaned_count} осиротевших эмбеддингов?`,
+                                                        danger: true,
+                                                        confirmLabel: 'Удалить все',
+                                                    });
+                                                    if (!ok) return;
                                                     let deleted = 0;
                                                     for (const item of orphanedEmbeddings.orphaned) {
                                                         try {
@@ -434,7 +572,7 @@ export default function VideoLibrary({ refreshTrigger }) {
                                                             console.error(`Failed to delete ${item.video_id}`, err);
                                                         }
                                                     }
-                                                    alert(`Удалено ${deleted} из ${orphanedEmbeddings.orphaned_count} эмбеддингов`);
+                                                    addToast(`Удалено ${deleted} из ${orphanedEmbeddings.orphaned_count} эмбеддингов`, 'success');
                                                     fetchOrphanedEmbeddings();
                                                 }}
                                                 className="w-full text-sm bg-red-500/10 text-red-400 px-4 py-2 rounded-lg hover:bg-red-500/20 transition-colors font-medium border border-red-500/20"

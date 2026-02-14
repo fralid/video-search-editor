@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useToast } from '../contexts/UIContext';
 
 const STATUS_CONFIG = {
     downloading: { label: 'Загрузка', icon: '⬇️', color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/20' },
@@ -8,9 +9,14 @@ const STATUS_CONFIG = {
     error: { label: 'Ошибка', icon: '❌', color: 'text-red-400', bg: 'bg-red-500/10', border: 'border-red-500/20' },
 };
 
+const POLL_INTERVAL_VISIBLE = 2000;   // 2s когда вкладка активна
+const POLL_INTERVAL_HIDDEN = 5000;    // 5s когда вкладка в фоне
+
 export default function QueuePanel() {
+    const { addToast } = useToast();
     const [queue, setQueue] = useState([]);
     const [collapsed, setCollapsed] = useState(false);
+    const [tabVisible, setTabVisible] = useState(() => typeof document !== 'undefined' ? !document.hidden : true);
     const intervalRef = useRef(null);
 
     const fetchQueue = async () => {
@@ -26,10 +32,17 @@ export default function QueuePanel() {
     };
 
     useEffect(() => {
-        fetchQueue();
-        intervalRef.current = setInterval(fetchQueue, 2000); // poll every 2s
-        return () => clearInterval(intervalRef.current);
+        const onVisibility = () => setTabVisible(!document.hidden);
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => document.removeEventListener('visibilitychange', onVisibility);
     }, []);
+
+    useEffect(() => {
+        fetchQueue();
+        const ms = tabVisible ? POLL_INTERVAL_VISIBLE : POLL_INTERVAL_HIDDEN;
+        intervalRef.current = setInterval(fetchQueue, ms);
+        return () => clearInterval(intervalRef.current);
+    }, [tabVisible]);
 
     const handleRemove = async (videoId) => {
         try {
@@ -37,11 +50,11 @@ export default function QueuePanel() {
             if (res.ok) {
                 setQueue(prev => prev.filter(item => item.video_id !== videoId));
             } else {
-                const data = await res.json();
-                alert(data.error || 'Не удалось удалить');
+                const data = await res.json().catch(() => ({}));
+                addToast(data.error || 'Не удалось удалить', 'error');
             }
         } catch (e) {
-            alert('Ошибка сети');
+            addToast('Ошибка сети', 'error');
         }
     };
 

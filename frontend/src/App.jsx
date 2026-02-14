@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import VideoSearch from './components/VideoSearch'
 import Sidebar from './components/Sidebar'
 import VideoPlayer from './components/VideoPlayer'
@@ -6,8 +6,9 @@ import VideoLibrary from './components/VideoLibrary'
 import AddVideo from './components/AddVideo'
 import QueuePanel from './components/QueuePanel'
 import { IconTheme, IconClose } from './components/Icons'
+import { UIContextProvider } from './contexts/UIContext'
 
-export default function App() {
+function AppContent() {
     // Theme state
     const [theme, setTheme] = useState(() => {
         if (typeof window !== 'undefined') {
@@ -20,7 +21,30 @@ export default function App() {
     const [refreshTrigger, setRefreshTrigger] = useState(0);
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [activeModal, setActiveModal] = useState(null); // 'library', 'add', null
-    const [wordSearchQuery, setWordSearchQuery] = useState('');
+    const [backendUnavailable, setBackendUnavailable] = useState(false);
+    const [tabVisible, setTabVisible] = useState(() => typeof document !== 'undefined' ? !document.hidden : true);
+
+    useEffect(() => {
+        const onVisibility = () => setTabVisible(!document.hidden);
+        document.addEventListener('visibilitychange', onVisibility);
+        return () => document.removeEventListener('visibilitychange', onVisibility);
+    }, []);
+
+    // Проверка доступности backend (реже при неактивной вкладке)
+    useEffect(() => {
+        const check = async () => {
+            try {
+                const res = await fetch('/api/health');
+                setBackendUnavailable(!res.ok);
+            } catch {
+                setBackendUnavailable(true);
+            }
+        };
+        check();
+        const ms = tabVisible ? 15000 : 30000;
+        const interval = setInterval(check, ms);
+        return () => clearInterval(interval);
+    }, [tabVisible]);
 
     // Apply theme
     useEffect(() => {
@@ -41,10 +65,27 @@ export default function App() {
         setTheme(prev => prev === 'dark' ? 'light' : 'dark');
     };
 
-    const closeModal = () => setActiveModal(null);
+    const closeModal = useCallback(() => setActiveModal(null), []);
+
+    useEffect(() => {
+        const onKey = (e) => {
+            if (e.key === 'Escape') {
+                if (activeModal) closeModal();
+                if (activeSegment) setActiveSegment(null);
+            }
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [activeModal, activeSegment, closeModal]);
 
     return (
         <div className="flex h-screen bg-app text-main font-sans selection:bg-electric/30 overflow-hidden relative">
+
+            {backendUnavailable && (
+                <div className="absolute top-0 left-0 right-0 z-50 bg-red-600/95 text-white px-4 py-2 text-center text-sm font-medium" role="alert">
+                    Сервер недоступен. Проверьте, что backend запущен (http://127.0.0.1:8000).
+                </div>
+            )}
 
             {/* Sidebar */}
             <Sidebar
@@ -52,7 +93,6 @@ export default function App() {
                 setIsOpen={setSidebarOpen}
                 onOpenLibrary={() => setActiveModal('library')}
                 onOpenAdd={() => setActiveModal('add')}
-                onWordSearch={(word) => setWordSearchQuery(word + '|' + Date.now())}
             />
 
             {/* Main Content */}
@@ -75,7 +115,7 @@ export default function App() {
 
                 {/* Chat / Search Area */}
                 <div className="flex-1 overflow-hidden relative">
-                    <VideoSearch onPlay={setActiveSegment} externalQuery={wordSearchQuery ? wordSearchQuery.split('|')[0] : ''} />
+                    <VideoSearch onPlay={setActiveSegment} />
                 </div>
             </main>
 
@@ -114,5 +154,13 @@ export default function App() {
                 onClose={() => setActiveSegment(null)}
             />
         </div>
+    )
+}
+
+export default function App() {
+    return (
+        <UIContextProvider>
+            <AppContent />
+        </UIContextProvider>
     )
 }

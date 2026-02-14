@@ -43,19 +43,26 @@ def _clean_old_fts(conn, video_id: str):
 
 
 def index_video(video_id: str) -> str:
-    """Индексировать видео: сегменты → чанки → vector + FTS5."""
+    """Индексировать видео: сегменты → чанки → vector + FTS5. Одно соединение БД на всю операцию."""
     conn = get_db()
-    rows = conn.execute(
-        "SELECT segment_id, video_id, start_sec, end_sec, text, words_json "
-        "FROM segments WHERE video_id=? ORDER BY start_sec",
-        (video_id,),
-    ).fetchall()
-    conn.close()
+    try:
+        rows = conn.execute(
+            "SELECT segment_id, video_id, start_sec, end_sec, text, words_json "
+            "FROM segments WHERE video_id=? ORDER BY start_sec",
+            (video_id,),
+        ).fetchall()
 
-    if not rows:
-        return f"Нет сегментов для '{video_id}'."
+        if not rows:
+            conn.close()
+            return f"Нет сегментов для '{video_id}'."
 
-    # Удаляем старые embeddings (ChromaDB)
+        # Удаляем старые FTS записи (то же соединение)
+        _clean_old_fts(conn, video_id)
+    except Exception:
+        conn.close()
+        raise
+
+    # Удаляем старые embeddings (ChromaDB) — БД не используем
     collection = _get_collection()
     try:
         existing = collection.get(where={"video_id": video_id})
@@ -65,10 +72,6 @@ def index_video(video_id: str) -> str:
             logger.info("Удалено %d старых векторов для %s", old_count, video_id)
     except Exception as e:
         logger.warning("Не удалось удалить старые векторы: %s", e)
-
-    # Удаляем старые FTS записи
-    conn = get_db()
-    _clean_old_fts(conn, video_id)
 
     segments = [dict(r) for r in rows]
     chunks = semantic_chunk(segments)
@@ -107,12 +110,12 @@ def index_video(video_id: str) -> str:
 
         total += len(batch)
 
-    conn.commit()
-
-    # Обновляем статус
-    conn.execute("UPDATE videos SET status='indexed' WHERE video_id=?", (video_id,))
-    conn.commit()
-    conn.close()
+    try:
+        conn.commit()
+        conn.execute("UPDATE videos SET status='indexed' WHERE video_id=?", (video_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
     elapsed = time.time() - t0
     return f"{total} vectors + FTS ({len(chunks)} чанков из {len(segments)} сегментов) за {elapsed:.1f}с"

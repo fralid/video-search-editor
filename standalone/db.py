@@ -46,6 +46,8 @@ def _migrate(conn: sqlite3.Connection):
         "channel_name": "ALTER TABLE videos ADD COLUMN channel_name TEXT",
         "duration": "ALTER TABLE videos ADD COLUMN duration INTEGER",
         "thumbnail_url": "ALTER TABLE videos ADD COLUMN thumbnail_url TEXT",
+        "uploaded_at": "ALTER TABLE videos ADD COLUMN uploaded_at TEXT",
+        "source_url": "ALTER TABLE videos ADD COLUMN source_url TEXT",
     }
     for col, sql in migrations.items():
         if col not in cols:
@@ -73,6 +75,7 @@ def _create_indexes(conn: sqlite3.Connection):
         ("idx_clip_created", "clips", "created_at DESC"),
         ("idx_video_status", "videos", "status"),
         ("idx_video_created", "videos", "created_at DESC"),
+        ("idx_video_channel_name", "videos", "channel_name"),
     ]
     for name, table, col in indexes:
         conn.execute(f"CREATE INDEX IF NOT EXISTS {name} ON {table}({col})")

@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import { useToast } from '../contexts/UIContext';
 
 /**
  * ClipEditor — интерактивный транскрипт + видеоплеер.
@@ -11,6 +12,7 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
  * - Выделение диапазона для вырезки клипа
  */
 export default function ClipEditor({ videoId, initialTime, initialEndTime, initialSegmentId, onClose }) {
+    const { addToast } = useToast();
     const videoRef = useRef(null);
     const transcriptRef = useRef(null);
     const activeLineRef = useRef(null);
@@ -163,7 +165,7 @@ export default function ClipEditor({ videoId, initialTime, initialEndTime, initi
 
     const createClip = async () => {
         if (clipStart === null || clipEnd === null || clipStart >= clipEnd) {
-            alert('Выберите начало и конец клипа');
+            addToast('Выберите начало и конец клипа', 'error');
             return;
         }
 
@@ -176,15 +178,16 @@ export default function ClipEditor({ videoId, initialTime, initialEndTime, initi
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ video_id: videoId, start: clipStart, end: clipEnd }),
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
             if (res.ok) {
                 setClipUrl(data.download_url);
+                addToast('Клип создан', 'success');
             } else {
-                alert(data.detail || 'Ошибка создания клипа');
+                addToast(data.detail || data.error || 'Ошибка создания клипа', 'error');
             }
         } catch (err) {
             console.error("Clip creation failed", err);
-            alert('Ошибка создания клипа');
+            addToast('Ошибка создания клипа', 'error');
         } finally {
             setCreating(false);
         }

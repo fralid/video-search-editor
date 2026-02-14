@@ -144,20 +144,19 @@ def _get_video_title(url: str, browser: str = "firefox") -> Optional[str]:
     """Получить название видео БЕЗ скачивания (yt-dlp --print title)."""
     if not _check_ytdlp():
         return None
-    
+
     command = [
         str(YTDLP_EXE),
         "--no-playlist",
         "--print", "title",
         "--skip-download",
     ]
-    
-    # Cookies для доступа к приватным видео
+
     if browser in BROWSER_MAP:
         command.extend(["--cookies-from-browser", BROWSER_MAP[browser]])
-    
+
     command.append(url)
-    
+
     try:
         result = subprocess.run(
             command,
@@ -170,8 +169,66 @@ def _get_video_title(url: str, browser: str = "firefox") -> Optional[str]:
             return result.stdout.strip()
     except Exception as e:
         logger.warning("Не удалось получить title для %s: %s", url, e)
-    
+
     return None
+
+
+def _get_metadata(url: str, browser: str = "firefox") -> dict:
+    """Получить метаданные YouTube без скачивания: канал, дата, длительность, превью.
+    Возвращает dict: channel_name, uploaded_at, duration, thumbnail_url (None при ошибке/отсутствии).
+    """
+    out = {
+        "channel_name": None,
+        "uploaded_at": None,
+        "duration": None,
+        "thumbnail_url": None,
+    }
+    if not _check_ytdlp():
+        return out
+
+    command = [
+        str(YTDLP_EXE),
+        "--no-playlist",
+        "--skip-download",
+        "--print", "%(channel)s",
+        "--print", "%(upload_date)s",
+        "--print", "%(duration)s",
+        "--print", "%(thumbnail)s",
+    ]
+    if browser in BROWSER_MAP:
+        command.extend(["--cookies-from-browser", BROWSER_MAP[browser]])
+    command.append(url)
+
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(_YTDLP_DIR),
+        )
+        if result.returncode != 0 or not result.stdout.strip():
+            return out
+        lines = [s.strip() for s in result.stdout.strip().split("\n") if s.strip()]
+        if len(lines) >= 1:
+            out["channel_name"] = lines[0] or None
+        if len(lines) >= 2 and lines[1]:
+            # YYYYMMDD -> YYYY-MM-DD
+            d = lines[1]
+            if len(d) == 8 and d.isdigit():
+                out["uploaded_at"] = f"{d[:4]}-{d[4:6]}-{d[6:8]}"
+            else:
+                out["uploaded_at"] = d
+        if len(lines) >= 3 and lines[2]:
+            try:
+                out["duration"] = int(float(lines[2]))
+            except (ValueError, TypeError):
+                pass
+        if len(lines) >= 4:
+            out["thumbnail_url"] = lines[3] or None
+    except Exception as e:
+        logger.warning("Не удалось получить метаданные для %s: %s", url, e)
+    return out
 
 
 def _file_exists_in_dir(title: str) -> Optional[Path]:
@@ -215,6 +272,8 @@ def download_video(
     if not _check_ytdlp():
         return {"status": "error", "error": f"yt-dlp.exe не найден в {_YTDLP_DIR}"}
 
+    meta = _get_metadata(url, browser)
+
     # ── Проверка: уже скачано? ──
     title_check = _get_video_title(url, browser)
     if title_check:
@@ -226,6 +285,8 @@ def download_video(
                 "title": title_check,
                 "path": str(existing),
                 "video_id": existing.stem,
+                "source_url": url,
+                **{k: v for k, v in meta.items() if v is not None},
             }
     
     command, work_dir = _build_command(url, quality, browser)
@@ -304,6 +365,8 @@ def download_video(
             "title": title,
             "path": final_path,
             "video_id": video_id,
+            "source_url": url,
+            **{k: v for k, v in meta.items() if v is not None},
         }
 
     except Exception as e:

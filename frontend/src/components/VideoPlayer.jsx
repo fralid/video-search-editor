@@ -1,7 +1,9 @@
 import React, { useRef, useEffect, useState } from 'react';
 import ClipEditor from './ClipEditor';
+import { useToast } from '../contexts/UIContext';
 
 export default function VideoPlayer({ segment, onClose }) {
+    const { addToast } = useToast();
     const videoRef = useRef(null);
     const [currentTime, setCurrentTime] = useState(0);
     const [duration, setDuration] = useState(0);
@@ -64,7 +66,7 @@ export default function VideoPlayer({ segment, onClose }) {
 
     const createClip = async () => {
         if (clipStart === null || clipEnd === null || clipStart >= clipEnd) {
-            alert('Please set valid start and end marks');
+            addToast('Укажите начало и конец фрагмента', 'error');
             return;
         }
 
@@ -81,16 +83,17 @@ export default function VideoPlayer({ segment, onClose }) {
                     end: clipEnd
                 })
             });
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
 
             if (res.ok) {
                 setClipUrl(data.download_url);
+                addToast('Клип создан', 'success');
             } else {
-                alert(data.detail || 'Failed to create clip');
+                addToast(data.detail || data.error || 'Не удалось создать клип', 'error');
             }
         } catch (err) {
             console.error("Clip creation failed", err);
-            alert('Failed to create clip');
+            addToast('Ошибка создания клипа', 'error');
         } finally {
             setCreating(false);
         }

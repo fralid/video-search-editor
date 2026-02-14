@@ -1,18 +1,43 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 
 export default function AddVideo({ onAdded, compact = false }) {
-    const [mode, setMode] = useState('youtube'); // 'youtube', 'single', 'bulk', 'channel'
+    const [mode, setMode] = useState('youtube'); // 'youtube', 'single', 'bulk'
     const [ytUrl, setYtUrl] = useState('');
     const [url, setUrl] = useState('');
     const [bulkUrls, setBulkUrls] = useState('');
-    const [channelUrl, setChannelUrl] = useState('');
-    const [channelLimit, setChannelLimit] = useState(20);
     const [tags, setTags] = useState('');
     const [loading, setLoading] = useState(false);
     const [msg, setMsg] = useState(null);
-    const [showAdvanced, setShowAdvanced] = useState(false);
 
-    // ... (logic remains same)
+    /** Отправить YouTube URL на скачивание (720p или best). clearInput — опционально вызвать после успеха (напр. setYtUrl('')). */
+    const submitYoutubeDownload = useCallback(async (videoUrl, quality, clearInput) => {
+        if (!videoUrl.trim()) return;
+        setLoading(true);
+        setMsg(null);
+        try {
+            const res = await fetch('/api/download/youtube', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: videoUrl.trim(), quality }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setMsg({
+                    type: 'success',
+                    text: quality === 'best' ? '⬇️ Скачиваю в макс. качестве...' : '⬇️ Скачиваю 720p... Видео появится в библиотеке',
+                });
+                if (typeof clearInput === 'function') clearInput();
+                if (onAdded) onAdded();
+            } else {
+                setMsg({ type: 'error', text: data.error || 'Ошибка' });
+            }
+        } catch (err) {
+            setMsg({ type: 'error', text: 'Network error' });
+        } finally {
+            setLoading(false);
+        }
+    }, [onAdded]);
+
     const handleSingleSubmit = async (e) => {
         e.preventDefault();
         if (!url.trim()) return;
@@ -32,7 +57,7 @@ export default function AddVideo({ onAdded, compact = false }) {
                 setUrl('');
                 if (onAdded) onAdded();
             } else {
-                setMsg({ type: 'error', text: data.detail || 'Failed to add video' });
+                setMsg({ type: 'error', text: data.error || data.detail || 'Failed to add video' });
             }
         } catch (err) {
             setMsg({ type: 'error', text: 'Network error' });
@@ -41,7 +66,6 @@ export default function AddVideo({ onAdded, compact = false }) {
         }
     };
 
-    // ... (other handlers same as below, just render changes)
     const handleBulkDownload = async (quality) => {
         const urls = bulkUrls.split('\n').map(u => u.trim()).filter(u => u);
         if (urls.length === 0) return;
@@ -65,41 +89,6 @@ export default function AddVideo({ onAdded, compact = false }) {
                 text: `⬇️ ${ok} видео в очереди на скачивание (${quality})${fail > 0 ? `, ${fail} ошибок` : ''}`
             });
             if (ok > 0) { setBulkUrls(''); if (onAdded) onAdded(); }
-        } catch (err) {
-            setMsg({ type: 'error', text: 'Network error' });
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleChannelSubmit = async (e) => {
-        e.preventDefault();
-        if (!channelUrl.trim()) return;
-
-        setLoading(true);
-        setMsg(null);
-        try {
-            const res = await fetch('/api/videos/import-channel', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    channel_url: channelUrl.trim(),
-                    limit: channelLimit,
-                    tags: tags.trim()
-                }),
-            });
-            const data = await res.json();
-
-            if (res.ok) {
-                setMsg({
-                    type: 'success',
-                    text: `✅ Importing ${data.videos_added} videos`
-                });
-                setChannelUrl('');
-                if (onAdded) onAdded();
-            } else {
-                setMsg({ type: 'error', text: data.detail || 'Failed to import channel' });
-            }
         } catch (err) {
             setMsg({ type: 'error', text: 'Network error' });
         } finally {
@@ -138,15 +127,6 @@ export default function AddVideo({ onAdded, compact = false }) {
                 >
                     Bulk
                 </button>
-                <button
-                    onClick={() => setMode('channel')}
-                    className={`flex-1 py-1.5 px-2 rounded-md text-[10px] font-semibold transition-all ${mode === 'channel'
-                        ? 'bg-electric text-white'
-                        : 'text-muted hover:text-main hover:bg-black/10'
-                        }`}
-                >
-                    Channel
-                </button>
             </div>
 
             {/* Forms */}
@@ -161,51 +141,17 @@ export default function AddVideo({ onAdded, compact = false }) {
                     />
                     <div className="flex gap-2">
                         <button
+                            type="button"
                             disabled={loading || !ytUrl.trim()}
-                            onClick={async () => {
-                                setLoading(true); setMsg(null);
-                                try {
-                                    const res = await fetch('/api/download/youtube', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ url: ytUrl.trim(), quality: '720p' }),
-                                    });
-                                    const data = await res.json();
-                                    if (res.ok) {
-                                        setMsg({ type: 'success', text: '⬇️ Скачиваю 720p... Видео появится в библиотеке' });
-                                        setYtUrl('');
-                                        if (onAdded) onAdded();
-                                    } else {
-                                        setMsg({ type: 'error', text: data.error || 'Ошибка' });
-                                    }
-                                } catch (err) { setMsg({ type: 'error', text: 'Network error' }); }
-                                finally { setLoading(false); }
-                            }}
+                            onClick={() => submitYoutubeDownload(ytUrl.trim(), '720p', () => setYtUrl(''))}
                             className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2.5 rounded-lg font-bold transition-all disabled:opacity-40 text-xs"
                         >
                             {loading ? '⏳ Скачиваю...' : '⚡ 720p (быстро)'}
                         </button>
                         <button
+                            type="button"
                             disabled={loading || !ytUrl.trim()}
-                            onClick={async () => {
-                                setLoading(true); setMsg(null);
-                                try {
-                                    const res = await fetch('/api/download/youtube', {
-                                        method: 'POST',
-                                        headers: { 'Content-Type': 'application/json' },
-                                        body: JSON.stringify({ url: ytUrl.trim(), quality: 'best' }),
-                                    });
-                                    const data = await res.json();
-                                    if (res.ok) {
-                                        setMsg({ type: 'success', text: '⬇️ Скачиваю в макс. качестве...' });
-                                        setYtUrl('');
-                                        if (onAdded) onAdded();
-                                    } else {
-                                        setMsg({ type: 'error', text: data.error || 'Ошибка' });
-                                    }
-                                } catch (err) { setMsg({ type: 'error', text: 'Network error' }); }
-                                finally { setLoading(false); }
-                            }}
+                            onClick={() => submitYoutubeDownload(ytUrl.trim(), 'best', () => setYtUrl(''))}
                             className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-lg font-bold transition-all disabled:opacity-40 text-xs"
                         >
                             {loading ? '⏳...' : '🎬 Best'}
@@ -220,35 +166,17 @@ export default function AddVideo({ onAdded, compact = false }) {
                     <input
                         type="text"
                         className="bg-element border border-transparent text-main px-3 py-2 rounded-lg focus:ring-1 focus:ring-electric outline-none w-full transition-all placeholder:text-muted text-xs"
-                        placeholder="YouTube URL или путь к файлу..."
+                        placeholder="Путь к файлу на сервере (напр. F:\videos\file.mp4) или YouTube URL"
                         value={url}
                         onChange={(e) => setUrl(e.target.value)}
                     />
-                    {/* YouTube кнопки */}
+                    <p className="text-[10px] text-muted">Путь указывается на машине, где запущен backend. Для YouTube вставьте ссылку и нажмите кнопку ниже.</p>
                     {url.trim() && (url.includes('youtube.com') || url.includes('youtu.be')) ? (
                         <div className="flex gap-2">
                             <button
                                 type="button"
                                 disabled={loading}
-                                onClick={async () => {
-                                    setLoading(true); setMsg(null);
-                                    try {
-                                        const res = await fetch('/api/download/youtube', {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ url: url.trim(), quality: '720p' }),
-                                        });
-                                        const data = await res.json();
-                                        if (res.ok) {
-                                            setMsg({ type: 'success', text: '⬇️ Скачиваю 720p... Следите в библиотеке' });
-                                            setUrl('');
-                                            if (onAdded) onAdded();
-                                        } else {
-                                            setMsg({ type: 'error', text: data.error || 'Ошибка' });
-                                        }
-                                    } catch (err) { setMsg({ type: 'error', text: 'Network error' }); }
-                                    finally { setLoading(false); }
-                                }}
+                                onClick={() => submitYoutubeDownload(url.trim(), '720p', () => setUrl(''))}
                                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg font-bold transition-all disabled:opacity-50 text-xs"
                             >
                                 {loading ? '⏳...' : '⚡ 720p (быстро)'}
@@ -256,25 +184,7 @@ export default function AddVideo({ onAdded, compact = false }) {
                             <button
                                 type="button"
                                 disabled={loading}
-                                onClick={async () => {
-                                    setLoading(true); setMsg(null);
-                                    try {
-                                        const res = await fetch('/api/download/youtube', {
-                                            method: 'POST',
-                                            headers: { 'Content-Type': 'application/json' },
-                                            body: JSON.stringify({ url: url.trim(), quality: 'best' }),
-                                        });
-                                        const data = await res.json();
-                                        if (res.ok) {
-                                            setMsg({ type: 'success', text: '⬇️ Скачиваю в макс. качестве...' });
-                                            setUrl('');
-                                            if (onAdded) onAdded();
-                                        } else {
-                                            setMsg({ type: 'error', text: data.error || 'Ошибка' });
-                                        }
-                                    } catch (err) { setMsg({ type: 'error', text: 'Network error' }); }
-                                    finally { setLoading(false); }
-                                }}
+                                onClick={() => submitYoutubeDownload(url.trim(), 'best', () => setUrl(''))}
                                 className="flex-1 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg font-bold transition-all disabled:opacity-50 text-xs"
                             >
                                 {loading ? '⏳...' : '🎬 Лучшее'}
@@ -286,7 +196,7 @@ export default function AddVideo({ onAdded, compact = false }) {
                             disabled={loading}
                             className="bg-electric hover:bg-electric/90 text-white px-4 py-2 rounded-lg font-bold transition-all disabled:opacity-50 w-full text-xs"
                         >
-                            {loading ? '...' : 'Add Video'}
+                            {loading ? '...' : 'Добавить по пути'}
                         </button>
                     )}
                 </form>
@@ -319,35 +229,6 @@ export default function AddVideo({ onAdded, compact = false }) {
                         </button>
                     </div>
                 </div>
-            )}
-
-            {/* Channel form simplified */}
-            {mode === 'channel' && (
-                <form onSubmit={handleChannelSubmit} className="flex flex-col gap-3">
-                    <input
-                        type="text"
-                        className="bg-element border border-transparent text-main px-3 py-2 rounded-lg focus:ring-1 focus:ring-electric outline-none w-full placeholder:text-muted text-xs"
-                        placeholder="Channel URL..."
-                        value={channelUrl}
-                        onChange={(e) => setChannelUrl(e.target.value)}
-                    />
-                    <div className="flex bg-element border border-border rounded-lg items-center px-2">
-                        <span className="text-[10px] text-muted mr-2">Limit:</span>
-                        <input
-                            type="number"
-                            className="bg-transparent text-main py-1 w-full outline-none text-xs"
-                            value={channelLimit}
-                            onChange={(e) => setChannelLimit(e.target.value)}
-                        />
-                    </div>
-                    <button
-                        type="submit"
-                        disabled={loading}
-                        className="bg-electric hover:bg-electric/90 text-white px-4 py-2 rounded-lg font-bold transition-all disabled:opacity-50 w-full text-xs"
-                    >
-                        {loading ? '...' : 'Import'}
-                    </button>
-                </form>
             )}
 
             {msg && (

@@ -1,8 +1,17 @@
 """Настройки standalone-приложения."""
+import os
 from pathlib import Path
 
-# Пути
-DATA_DIR = Path("./standalone_data")
+# Корень проекта (родитель каталога standalone/)
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Пути: от env STANDALONE_DATA_DIR или относительно корня проекта
+_DATA_DIR_RAW = os.environ.get("STANDALONE_DATA_DIR")
+if _DATA_DIR_RAW:
+    DATA_DIR = Path(_DATA_DIR_RAW).resolve()
+else:
+    DATA_DIR = _PROJECT_ROOT / "standalone_data"
+
 VIDEO_DIR = DATA_DIR / "videos"
 CLIPS_DIR = DATA_DIR / "clips"
 CHROMA_DIR = DATA_DIR / "chroma"

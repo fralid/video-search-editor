@@ -7,7 +7,7 @@
 """
 import re
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from .config import SEARCH_TOP_K
 from .models import get_embed_model
@@ -33,13 +33,16 @@ def _get_collection():
 
 # ─── Vector Search ──────────────────────────────────────────
 
-def _vector_search(query: str, top_k: int) -> List[Dict[str, Any]]:
-    """Семантический поиск через ChromaDB."""
+def _vector_search(query: str, top_k: int, video_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """Семантический поиск через ChromaDB. Если video_ids задан — только эти видео."""
     model = get_embed_model()
     collection = _get_collection()
 
     emb = model.encode([query], normalize_embeddings=True).tolist()
-    results = collection.query(query_embeddings=emb, n_results=top_k)
+    kwargs = {"query_embeddings": emb, "n_results": top_k}
+    if video_ids:
+        kwargs["where"] = {"video_id": {"$in": video_ids}}
+    results = collection.query(**kwargs)
 
     ids = results.get("ids", [[]])[0]
     distances = results.get("distances", [[]])[0]
@@ -64,16 +67,20 @@ def _vector_search(query: str, top_k: int) -> List[Dict[str, Any]]:
 
 # ─── FTS5 Search ────────────────────────────────────────────
 
-def _fts_search(query: str, top_k: int) -> List[Dict[str, Any]]:
-    """BM25 поиск через FTS5. Санитизация запроса для FTS5 синтаксиса."""
-    # Убираем спецсимволы FTS5
+def _fts_search(query: str, top_k: int, video_ids: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """BM25 поиск через FTS5. Если video_ids задан — фильтруем по ним после запроса."""
     clean = re.sub(r'[^\w\s]', ' ', query).strip()
     if not clean:
         return []
 
-    rows = _db_fts_search(clean, top_k)
+    rows = _db_fts_search(clean, top_k * 3 if video_ids else top_k)
     if not rows:
         return []
+    if video_ids:
+        vid_set = set(video_ids)
+        rows = [r for r in rows if r.get("video_id") in vid_set][:top_k]
+    else:
+        rows = rows[:top_k]
 
     # Подтягиваем timestamps из ChromaDB метаданных (если есть)
     # FTS хранит segment_id = chunk ID, timestamps можно получить из collection
@@ -197,13 +204,19 @@ def _deduplicate_overlapping(
 
 # ─── Main Search ────────────────────────────────────────────
 
-def search(query: str, top_k: int = SEARCH_TOP_K, use_fts: bool = True) -> List[Dict[str, Any]]:
+def search(
+    query: str,
+    top_k: int = SEARCH_TOP_K,
+    use_fts: bool = True,
+    video_ids: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
     """Hybrid search: vector + FTS5 + RRF fusion + дедупликация.
 
     Args:
         query: поисковый запрос
         top_k: количество результатов
         use_fts: использовать ли FTS5 (BM25) дополнительно к vector
+        video_ids: если задан — искать только в этих видео
 
     Returns:
         Отсортированный список результатов с полями:
@@ -212,15 +225,12 @@ def search(query: str, top_k: int = SEARCH_TOP_K, use_fts: bool = True) -> List[
     if not query.strip():
         return []
 
-    # Запрашиваем больше кандидатов для fusion + дедупликации
     n_candidates = top_k * 3
 
-    # 1. Vector search (семантика)
-    vec_results = _vector_search(query, n_candidates)
+    vec_results = _vector_search(query, n_candidates, video_ids=video_ids)
 
-    # 2. FTS search (точные слова, BM25)
     if use_fts:
-        fts_results = _fts_search(query, n_candidates)
+        fts_results = _fts_search(query, n_candidates, video_ids=video_ids)
     else:
         fts_results = []
 
