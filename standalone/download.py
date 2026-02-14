@@ -140,6 +140,47 @@ def _extract_filename(line: str) -> Optional[str]:
     return None
 
 
+def get_playlist_or_channel_video_ids(
+    url: str,
+    browser: str = "firefox",
+    max_entries: int = 500,
+) -> List[str]:
+    """Получить список video_id из канала или плейлиста (без --no-playlist).
+    Возвращает до max_entries id; пустой список при ошибке.
+    """
+    if not _check_ytdlp():
+        return []
+    command = [
+        str(YTDLP_EXE),
+        "--flat-playlist",
+        "--print", "id",
+        "--no-download",
+        "--no-warnings",
+        "-I", f"1:{max_entries + 1}",
+    ]
+    if browser in BROWSER_MAP:
+        command.extend(["--cookies-from-browser", BROWSER_MAP[browser]])
+    command.extend(["--user-agent", USER_AGENT])
+    command.append(url)
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=str(VIDEO_DIR) if VIDEO_DIR.exists() else None,
+        )
+        if result.returncode != 0:
+            logger.warning("yt-dlp playlist failed: %s", result.stderr[:200] if result.stderr else "")
+            return []
+        ids = [line.strip() for line in result.stdout.strip().splitlines() if line.strip()]
+        # только валидные id (11 символов для YouTube)
+        return [i for i in ids if len(i) == 11 and i.replace("-", "").replace("_", "").isalnum()][:max_entries]
+    except Exception as e:
+        logger.warning("get_playlist_or_channel_video_ids failed: %s", e)
+        return []
+
+
 def _get_video_title(url: str, browser: str = "firefox") -> Optional[str]:
     """Получить название видео БЕЗ скачивания (yt-dlp --print title)."""
     if not _check_ytdlp():

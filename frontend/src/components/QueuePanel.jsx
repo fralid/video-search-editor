@@ -15,7 +15,7 @@ const POLL_INTERVAL_HIDDEN = 5000;    // 5s когда вкладка в фон�
 export default function QueuePanel() {
     const { addToast } = useToast();
     const [queue, setQueue] = useState([]);
-    const [collapsed, setCollapsed] = useState(false);
+    const [collapsed, setCollapsed] = useState(true);
     const [tabVisible, setTabVisible] = useState(() => typeof document !== 'undefined' ? !document.hidden : true);
     const intervalRef = useRef(null);
 
@@ -70,10 +70,26 @@ export default function QueuePanel() {
     const waitingCount = queue.filter(q => q.status === 'waiting').length;
     const doneCount = queue.filter(q => q.status === 'done' || q.status === 'error').length;
 
-    if (queue.length === 0 && collapsed) return null;
-
     return (
-        <div className="w-72 bg-panel border-l border-border flex flex-col h-full">
+        <div className={`bg-panel border-l border-border flex flex-col h-full transition-all duration-300 flex-shrink-0 ${collapsed ? 'w-16' : 'w-72'}`}>
+            {collapsed ? (
+                /* Свёрнутая полоска — как левый сайдбар */
+                <div className="flex flex-col items-center py-4">
+                    <button
+                        onClick={() => setCollapsed(false)}
+                        className="p-2 rounded-lg hover:bg-white/5 transition-colors text-muted hover:text-main"
+                        title="Развернуть очередь"
+                    >
+                        <span className="text-lg">▸</span>
+                    </button>
+                    {queue.length > 0 && (
+                        <span className="mt-2 px-1.5 py-0.5 rounded-full bg-electric/20 text-electric text-[9px] font-bold">
+                            {queue.length}
+                        </span>
+                    )}
+                </div>
+            ) : (
+                <>
             {/* Header */}
             <div className="p-3 border-b border-border flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -105,16 +121,16 @@ export default function QueuePanel() {
                         </button>
                     )}
                     <button
-                        onClick={() => setCollapsed(!collapsed)}
+                        onClick={() => setCollapsed(true)}
                         className="text-[9px] text-muted hover:text-main px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 transition-colors"
+                        title="Свернуть"
                     >
-                        {collapsed ? '▸' : '▾'}
+                        ▾
                     </button>
                 </div>
             </div>
 
             {/* Queue items */}
-            {!collapsed && (
                 <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
                     {queue.length === 0 ? (
                         <p className="text-[10px] text-muted text-center py-8">Очередь пуста</p>
@@ -170,6 +186,7 @@ export default function QueuePanel() {
                         })
                     )}
                 </div>
+                </>
             )}
         </div>
     );

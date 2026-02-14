@@ -33,20 +33,6 @@ export default function Sidebar({ isOpen, setIsOpen, onOpenLibrary, onOpenAdd })
                     {isOpen && <span className="font-medium text-sm">Добавить видео</span>}
                 </button>
             </div>
-
-            {/* Footer */}
-            <div className="p-4 mt-auto border-t border-border/50">
-                <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-full bg-electric flex items-center justify-center text-[10px] font-bold text-app">
-                        AI
-                    </div>
-                    {isOpen && (
-                        <div className="overflow-hidden">
-                            <div className="text-sm font-bold truncate">Администратор</div>
-                        </div>
-                    )}
-                </div>
-            </div>
         </div>
     );
 }
