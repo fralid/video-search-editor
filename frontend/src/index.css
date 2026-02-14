@@ -1,0 +1,51 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    :root {
+        /* Light Theme (Default) */
+        --color-bg-app: #e2e2e4;
+        --color-bg-panel: #f1f1f3;
+        --color-bg-element: #ffffff;
+        --color-text-main: #1a202c;
+        --color-text-muted: #64748b;
+        --color-border: rgba(0, 0, 0, 0.1);
+
+        /* Accents need to be readable on light */
+        --color-plasma: #7ecef2;
+        --color-electric: #7ecef2;
+        --color-cyber: #7ecef2;
+        /* Darker cyan for light mode visibility */
+    }
+
+    .dark {
+        /* Telegram Dark Theme Palette */
+        --color-bg-app: #0e1621;
+        /* Chat background (Deep Blue-Black) */
+        --color-bg-panel: #17212b;
+        /* Sidebar/Cards (Dark Slate Blue) */
+        --color-bg-element: #242f3d;
+        /* Inputs/Search/Item Hover (Lighter Slate) */
+        --color-text-main: #f5f5f5;
+        /* Primary Text (White-ish) */
+        --color-text-muted: #8295a6;
+        /* Secondary Text (Slate Blue Grey) */
+        --color-border: rgba(0, 0, 0, 0.5);
+        /* Stronger borders for contrast */
+
+        /* Telegram uses Blue as primary, but preserving Neon accents with better contrast */
+        --color-plasma: #3f96d0;
+        /* Requested Blue */
+        --color-electric: #3f96d0;
+        /* Requested Blue */
+        --color-cyber: #3f96d0;
+        /* Requested Blue */
+    }
+
+    body {
+        @apply bg-app text-main transition-colors duration-300;
+    }
+}

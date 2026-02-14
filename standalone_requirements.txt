@@ -1,0 +1,32 @@
+# Standalone Video Search & Editor
+# Backend зависимости (без Docker/WSL/PostgreSQL/Redis)
+
+# API сервер
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+aiofiles
+
+# ASR (insanely-fast-whisper)
+insanely-fast-whisper>=0.0.15
+transformers>=4.36.0
+optimum
+accelerate
+
+# Embeddings + семантическая нарезка
+sentence-transformers>=3.0.0
+
+# Векторная БД
+chromadb>=0.5.0
+
+# VAD (Voice Activity Detection) для preprocessing
+silero-vad>=4.0.0
+
+# Аудио обработка
+torchaudio>=2.0.0
+
+# Метрики и вычисления
+numpy>=1.24.0
+
+# PyTorch
+# GPU: pip install torch --index-url https://download.pytorch.org/whl/cu121
+# CPU: pip install torch --index-url https://download.pytorch.org/whl/cpu

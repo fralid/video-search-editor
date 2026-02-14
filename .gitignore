@@ -1,0 +1,50 @@
+# === SYSTEM ===
+__pycache__/
+*.py[cod]
+*.log
+.env
+.vscode/
+.idea/
+*.DS_Store
+Thumbs.db
+
+# === VIRTUAL ENV ===
+.venv/
+venv/
+env/
+
+# === DATA (60GB+ is here) ===
+standalone_data/
+data/
+db.sqlite3
+*.db
+*.sqlite
+
+# === CACHE & MODELS ===
+.cache/
+start_cache/
+
+# === FRONTEND ===
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
+
+# === BINARIES ===
+# GitHub limit is 100MB. ffmpeg.exe is 130MB+.
+# User should download them or use a setup script.
+*.exe
+*.dll
+*.so
+*.bin
+
+# === LOGS ===
+dockerd.log
+transcribe.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# === LEGACY JUNK ===
+0.0.15
+check_status.py
+full_maintain.bat
